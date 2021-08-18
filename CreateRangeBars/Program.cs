@@ -1,4 +1,6 @@
-﻿using System;
+﻿
+
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -46,7 +48,7 @@ namespace CreatePerTickValue {
             
             DateTime dt;
 #endif
-            string row;
+            string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
             int numTimeGaps = 0;
@@ -54,6 +56,7 @@ namespace CreatePerTickValue {
             float cumValue = 0f;
 
             StreamWriter sw = new StreamWriter(outFilename);
+
             using (ZipArchive archive = ZipFile.OpenRead(ArchiveName)) {
                 if (archive.Entries.Count != 1)
                     throw new Exception($"There must be only one entry in each zip file: {ArchiveName}");
@@ -63,7 +66,7 @@ namespace CreatePerTickValue {
                 int numLines = 0;
                 Stopwatch timePerRead = Stopwatch.StartNew();
                 using (StreamReader reader = new StreamReader(zip.Open())) {
-                    string header = reader.ReadLine();
+                    string? header = reader.ReadLine();
                     if (header == null) {
                         Console.WriteLine($"{zip.Name} is empty.");
                         return;

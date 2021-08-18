@@ -1,7 +1,7 @@
-# ReadSierraChartSCIDSharp
+# CreateRangeBars
 C# version of program to read tick data files created by ReadSierraChartSCIDSharp and create cenetered range bars
 
-This program reads tick files from the local SierraChartData directory.
+This program reads tick files from the local SierraChartData directory and creates associated cenetered range bar files
 On my machine this is at C:/Users/larry/SierraChartData. I have a private GitHub repo named SierraChartData which also has this data
 
 Each input file name is actually a csv file named: {futures prefix}{futures month code}{2 digit year}.txt
