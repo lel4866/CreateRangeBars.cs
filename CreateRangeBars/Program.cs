@@ -30,8 +30,6 @@ namespace CreateRangeBars {
         static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
         const string userid = "lel48";
-        const string baseDir = @"C:\Users\" + userid + @"\MarketData\";
-        const string outFilename = baseDir + "RTY_5sec_target_2020_03_23_to_2020_09_21.txt";
         const int minTicks = 4000; // write out message to stats file if day has fewer than this many ticks
         const bool header = false;
         const int maxGap = 60;
@@ -55,7 +53,7 @@ namespace CreateRangeBars {
             if (logger.state != 0)
                 return -1;
             string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
-            Parallel.ForEach(archiveNames, archiveName => ProcessTickFile(futures_root, archiveName, logger));
+            Parallel.ForEach(archiveNames, archiveName => ProcessTickArchive(futures_root, archiveName, logger));
             logger.close();
 
             stopWatch.Stop();
@@ -64,7 +62,7 @@ namespace CreateRangeBars {
             return 0;
         }
 
-        static void ProcessTickFile(string futures_root, string archiveName, Logger logger) { 
+        static int ProcessTickArchive(string futures_root, string archiveName, Logger logger) { 
             string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
@@ -72,20 +70,45 @@ namespace CreateRangeBars {
             int maxTimeGap = 0;
             float cumValue = 0f;
 
-            StreamWriter sw = new StreamWriter(outFilename);
+            char futures_code = archiveName[futures_root.Length];
+            if (!futures_codes.ContainsKey(futures_code))
+                return logger.log(2, "Malformed futures file name: " + archiveName);
+
+            // get 4 digit futures year from zip filename (which has 2 digit year)
+            string futures_two_digit_year_str = archiveName.Substring(futures_root.Length + 1, 2);
+            if (!Char.IsDigit(futures_two_digit_year_str[0]) || !Char.IsDigit(futures_two_digit_year_str[1]))
+                return logger.log(2, "Malformed futures file name: " + archiveName);
+            int futures_year;
+            bool parse_suceeded = Int32.TryParse(futures_two_digit_year_str, out futures_year);
+            if (!parse_suceeded)
+                return logger.log(2, "Malformed futures file name: " + archiveName);
+            futures_year += 2000;
+
+            // get filenames for temporary .csv output file and final .zip file
+            string out_fn_base = futures_root + futures_code + futures_two_digit_year_str;
+            string out_path = datafile_outdir + out_fn_base;
+            string out_path_csv = out_path + ".csv"; // full path
+            string out_path_zip = out_path + ".zip"; // full path
+
+            StreamWriter sw = new StreamWriter(out_path_csv);
 
             using (ZipArchive archive = ZipFile.OpenRead(archiveName)) {
-                if (archive.Entries.Count != 1)
-                    throw new Exception($"There must be only one entry in each zip file: {archiveName}");
+                if (archive.Entries.Count != 1) {
+                    logger.log(1, "There must be only one entry in each zip file: " + archiveName);
+                    return -1;
+                }
                 ZipArchiveEntry zip = archive.Entries[0];
-                Console.WriteLine($"Processing archive {zip.Name}");
+                string filename = zip.Name;
+
+
+                Console.WriteLine("Processing archive " + filename);
 
                 int numLines = 0;
                 using (StreamReader reader = new StreamReader(zip.Open())) {
                     string? header = reader.ReadLine();
                     if (header == null) {
-                        Console.WriteLine($"{zip.Name} is empty.");
-                        return;
+                        logger.log(2, filename + " is empty.");
+                        return -1;
                     }
 
                     List<Tick> ticks = new List<Tick>();
@@ -146,6 +169,8 @@ namespace CreateRangeBars {
 
                 sw.Close();
                 Console.WriteLine($"Total Value is {cumValue}");
+
+                return 0;
             }
         }
 
