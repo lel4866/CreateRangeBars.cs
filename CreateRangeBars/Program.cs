@@ -23,15 +23,14 @@ namespace CreateRangeBars {
     static internal class Program {
         internal const string version = "CreateRangeBars 0.1.0";
         internal static string futures_root = "ES";
-        internal static bool update_only = true; // only process .scid files in datafile_dir which do not have counterparts in datafile_outdir
+        internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir
         
-        const string datafile_dir = "C:/SierraChart/Data/";
-        const string datafile_outdir = "C:/Users/lel48/SierraChartData/";
+        const string datafile_dir = "C:/Users/lel48/SierraChartData";
+        const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars";
         static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
         const string userid = "lel48";
         const string baseDir = @"C:\Users\" + userid + @"\MarketData\";
-        const string ArchiveName = baseDir + "RTY_5sec_2020_03_23_to_2020_09_21.zip";
         const string outFilename = baseDir + "RTY_5sec_target_2020_03_23_to_2020_09_21.txt";
         const int minTicks = 4000; // write out message to stats file if day has fewer than this many ticks
         const bool header = false;
@@ -55,9 +54,8 @@ namespace CreateRangeBars {
             var logger = new Logger(datafile_outdir);
             if (logger.state != 0)
                 return -1;
-            string[] filenames = Directory.GetFiles(datafile_dir, futures_root + "*.scid", SearchOption.TopDirectoryOnly);
-            string[] existing_filenames = Directory.GetFiles(datafile_outdir, futures_root + "*.scid", SearchOption.TopDirectoryOnly);
-            Parallel.ForEach(filenames, filename => ProcessTickFile(futures_root, filename, logger));
+            string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
+            Parallel.ForEach(archiveNames, archiveName => ProcessTickFile(futures_root, archiveName, logger));
             logger.close();
 
             stopWatch.Stop();
@@ -66,7 +64,7 @@ namespace CreateRangeBars {
             return 0;
         }
 
-        static void ProcessTickFile(string futures_root, string filename, Logger logger) { 
+        static void ProcessTickFile(string futures_root, string archiveName, Logger logger) { 
             string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
@@ -76,14 +74,13 @@ namespace CreateRangeBars {
 
             StreamWriter sw = new StreamWriter(outFilename);
 
-            using (ZipArchive archive = ZipFile.OpenRead(ArchiveName)) {
+            using (ZipArchive archive = ZipFile.OpenRead(archiveName)) {
                 if (archive.Entries.Count != 1)
-                    throw new Exception($"There must be only one entry in each zip file: {ArchiveName}");
+                    throw new Exception($"There must be only one entry in each zip file: {archiveName}");
                 ZipArchiveEntry zip = archive.Entries[0];
                 Console.WriteLine($"Processing archive {zip.Name}");
 
                 int numLines = 0;
-                Stopwatch timePerRead = Stopwatch.StartNew();
                 using (StreamReader reader = new StreamReader(zip.Open())) {
                     string? header = reader.ReadLine();
                     if (header == null) {
@@ -148,10 +145,7 @@ namespace CreateRangeBars {
                 }
 
                 sw.Close();
-                timePerRead.Stop();
-                float elapsedTime = timePerRead.ElapsedMilliseconds / 1000.0f;
                 Console.WriteLine($"Total Value is {cumValue}");
-                Console.WriteLine($"Read {numLines} lines in {elapsedTime} seconds.");
             }
         }
 
