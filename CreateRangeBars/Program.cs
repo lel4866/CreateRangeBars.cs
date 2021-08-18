@@ -8,7 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Threading.Tasks;
 
-namespace CreatePerTickValue {
+namespace CreateRangeBars {
     internal class Tick {
         internal int index;
         internal DateTime time;
@@ -20,7 +20,15 @@ namespace CreatePerTickValue {
         internal float value; // target for ml: looks forward in time
     }
 
-    class Program {
+    static internal class Program {
+        internal const string version = "CreateRangeBars 0.1.0";
+        internal static string futures_root = "ES";
+        internal static bool update_only = true; // only process .scid files in datafile_dir which do not have counterparts in datafile_outdir
+        
+        const string datafile_dir = "C:/SierraChart/Data/";
+        const string datafile_outdir = "C:/Users/lel48/SierraChartData/";
+        static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
+
         const string userid = "lel48";
         const string baseDir = @"C:\Users\" + userid + @"\MarketData\";
         const string ArchiveName = baseDir + "RTY_5sec_2020_03_23_to_2020_09_21.zip";
@@ -40,14 +48,25 @@ namespace CreatePerTickValue {
         static DateTime firstDate = Convert.ToDateTime("1/1/2000");
         static DateTime checkDate = Convert.ToDateTime("9/18/2020");
 
-        static void Main(string[] args) {
-#if false
-            int i;
-            int dateL = datefmt.Length; // 8 for yyyyMMdd; 10 for mm/dd/yyyy
-            int dtL = dtfmt.Length;
-            
-            DateTime dt;
-#endif
+        static int Main(string[] args) {
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
+
+            var logger = new Logger(datafile_outdir);
+            if (logger.state != 0)
+                return -1;
+            string[] filenames = Directory.GetFiles(datafile_dir, futures_root + "*.scid", SearchOption.TopDirectoryOnly);
+            string[] existing_filenames = Directory.GetFiles(datafile_outdir, futures_root + "*.scid", SearchOption.TopDirectoryOnly);
+            Parallel.ForEach(filenames, filename => ProcessTickFile(futures_root, filename, logger));
+            logger.close();
+
+            stopWatch.Stop();
+            Console.WriteLine($"Elapsed time = {stopWatch.Elapsed}");
+
+            return 0;
+        }
+
+        static void ProcessTickFile(string futures_root, string filename, Logger logger) { 
             string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
