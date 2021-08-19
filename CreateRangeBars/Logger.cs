@@ -12,7 +12,7 @@ namespace CreateRangeBars {
 
         internal Logger(string datafile_dir) {
             try {
-                string log_path = Path.Combine(datafile_dir, "Logs/");
+                string log_path = Path.Combine(datafile_dir, "Logs/"); //
                 if (!Directory.Exists(log_path)) {
                     Directory.CreateDirectory(log_path);
                 }
