@@ -1,4 +1,10 @@
-﻿
+﻿// This program reads in tick files (like those created by ReadSierraChartSCIDSharp), and writes out files by doing two things:
+// 1. compress the data by converting ticks to cenetered range bars
+// 2. create additional data fields that can be used as lables or inputs in machine learning.
+//
+// One of the things you need to do for supervised learning is have a label for each observation. In this case the observation
+// is eaach range bar. The primary label this progrm creates is, assuming you entered a trade at the price of the range bar, 
+// what's the maximum percent you could make before some percentage decline. This is the "long term value" of the range bar
 
 using System;
 using System.Collections.Generic;
@@ -24,9 +30,9 @@ namespace CreateRangeBars {
         internal const string version = "CreateRangeBars 0.1.0";
         internal static string futures_root = "ES";
         internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir
-        
+
         const string datafile_dir = "C:/Users/lel48/SierraChartData";
-        const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars";
+        const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars/";
         static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
         const string userid = "lel48";
@@ -45,17 +51,18 @@ namespace CreateRangeBars {
         static DateTime firstDate = Convert.ToDateTime("1/1/2000");
         static DateTime checkDate = Convert.ToDateTime("9/18/2020");
 
-        static Logger logger;
+        static Logger logger = new Logger(datafile_outdir);
 
         static int Main(string[] args) {
+            if (logger.state != 0)
+                return -1;
+
             var stopWatch = new Stopwatch();
             stopWatch.Start();
 
-            logger = new Logger(datafile_outdir);
-            if (logger.state != 0)
-                return -1;
             string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
-            Parallel.ForEach(archiveNames, archiveName => ProcessTickArchive(futures_root, archiveName, logger));
+            //Parallel.ForEach(archiveNames, archiveName => ProcessTickArchive(futures_root, archiveName, logger));
+            ProcessTickArchive(futures_root, archiveNames[0], logger); // debug
             logger.close();
 
             stopWatch.Stop();
@@ -64,7 +71,7 @@ namespace CreateRangeBars {
             return 0;
         }
 
-        static int ProcessTickArchive(string futures_root, string archiveName, Logger logger) { 
+        static int ProcessTickArchive(string futures_root, string archiveName, Logger logger) {
             string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
@@ -72,88 +79,87 @@ namespace CreateRangeBars {
             int maxTimeGap = 0;
             float cumValue = 0f;
 
-            (int rc, string out_path) = ValidateFuturesFilename(archiveName);
+            var archive_filename = Path.GetFullPath(archiveName);
+            var futures_contract = Path.GetFileNameWithoutExtension(archiveName);
+            (int rc, string out_path) = ValidateFuturesFilename(futures_contract);
             if (rc < 0)
                 return -1;
 
-            StreamWriter sw = new StreamWriter(out_path + ".csv");
-
-            using (ZipArchive archive = ZipFile.OpenRead(archiveName)) {
+            using (ZipArchive archive = ZipFile.OpenRead(archive_filename)) {
                 if (archive.Entries.Count != 1) {
-                    logger.log(1, "There must be only one entry in each zip file: " + archiveName);
+                    logger.log(1, "There must be only one entry in each zip file: " + archive_filename);
                     return -1;
                 }
                 ZipArchiveEntry zip = archive.Entries[0];
-                string filename = zip.Name;
 
-
-                Console.WriteLine("Processing archive " + filename);
+                Console.WriteLine("Processing archive " + archive_filename);
 
                 int numLines = 0;
                 using (StreamReader reader = new StreamReader(zip.Open())) {
+#if false // no header written yet
                     string? header = reader.ReadLine();
                     if (header == null) {
-                        logger.log(2, filename + " is empty.");
+                        logger.log(2, zip.Name + " is empty.");
                         return -1;
                     }
+#endif
+                    using (StreamWriter writer = new StreamWriter(out_path + ".csv")) {
+                        List<Tick> ticks = new List<Tick>();
+                        int tickIndex = 0;
+                        while ((row = reader.ReadLine()) != null) {
+                            numLines++;
+                            Tick tick = new Tick();
+                            if (!validateRow(row, numLines, tick))
+                                continue;
 
-                    List<Tick> ticks = new List<Tick>();
-                    int tickIndex = 0;
-                    while ((row = reader.ReadLine()) != null) {
-                        numLines++;
-                        Tick tick = new Tick();
-                        if (!validateRow(row, numLines, tick))
-                            continue;
+                            TimeSpan dtDiff = tick.time.Date - lastDateTime.Date;
 
-                        TimeSpan dtDiff = tick.time.Date - lastDateTime.Date;
+                            // see if this starts new day
+                            if (tick.time.Date != lastDateTime.Date) {
+                                newDay = true;
+                                if (ticks.Count > 0) {
+                                    Parallel.ForEach(ticks, tick => ProcessTick(ticks, tick.index));
 
-                        // see if this starts new day
-                        if (tick.time.Date != lastDateTime.Date) {
-                            newDay = true;
-                            if (ticks.Count > 0) {
-                                Parallel.ForEach(ticks, tick => ProcessTick(ticks, tick.index));
+                                    // compute total value for day
+                                    float cumValueOfDay = 0f;
+                                    foreach (Tick t in ticks)
+                                        cumValueOfDay += t.value;
+                                    Console.WriteLine($"Value of {lastDateTime:d} is {cumValueOfDay}");
 
-
-                                // compute total value for day
-                                float cumValueOfDay = 0f;
-                                foreach (Tick t in ticks)
-                                    cumValueOfDay += t.value;
-                                Console.WriteLine($"Value of {lastDateTime:d} is {cumValueOfDay}");
-
-                                cumValue += cumValueOfDay;
-                            }
-
-                            WriteTicks(sw, ticks);
-                            ticks.Clear();
-                            tickIndex = 0;
-                        }
-                        else {
-                            if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
-                                // see if we've skipped bar interval
-                                TimeSpan tDiff = tick.time - lastDateTime;
-                                int iDiff = (int)tDiff.TotalSeconds;
-                                if (iDiff > barSize) {
-                                    // add fake ticks
-                                    DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
-                                    while (fakeTickTime < tick.time) {
-                                        Tick newTick = new Tick();
-                                        newTick.index = tickIndex++;
-                                        newTick.time = fakeTickTime;
-                                        fakeTickTime = fakeTickTime.AddSeconds(barSize);
-                                        newTick.open = newTick.high = newTick.low = newTick.close = tick.close;
-                                        ticks.Add(newTick);
-                                    }
+                                    cumValue += cumValueOfDay;
                                 }
-                                tick.index = tickIndex++;
-                                ticks.Add(tick);
-                            }
-                        }
 
-                        lastDateTime = tick.time;
+                                WriteTicks(writer, ticks);
+                                ticks.Clear();
+                                tickIndex = 0;
+                            }
+                            else {
+                                if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
+                                    // see if we've skipped bar interval
+                                    TimeSpan tDiff = tick.time - lastDateTime;
+                                    int iDiff = (int)tDiff.TotalSeconds;
+                                    if (iDiff > barSize) {
+                                        // add fake ticks
+                                        DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
+                                        while (fakeTickTime < tick.time) {
+                                            Tick newTick = new Tick();
+                                            newTick.index = tickIndex++;
+                                            newTick.time = fakeTickTime;
+                                            fakeTickTime = fakeTickTime.AddSeconds(barSize);
+                                            newTick.open = newTick.high = newTick.low = newTick.close = tick.close;
+                                            ticks.Add(newTick);
+                                        }
+                                    }
+                                    tick.index = tickIndex++;
+                                    ticks.Add(tick);
+                                }
+                            }
+
+                            lastDateTime = tick.time;
+                        }
                     }
                 }
 
-                sw.Close();
                 Console.WriteLine($"Total Value is {cumValue}");
 
                 return 0;
@@ -216,24 +222,23 @@ namespace CreateRangeBars {
         static bool validateRow(string row, int lineno, Tick tick) {
             // validate row
             string[] cols = row.Split(',');
-            if (cols.Length < 6) {
-                Console.WriteLine($"Line {lineno} has fewer than 6 columns. Line ignored.");
+            if (cols.Length < 2) {
+                Console.WriteLine($"Line {lineno} has fewer than 2 columns. Line ignored.");
                 return false;
             }
 
-            string sdt = cols[0] + ',' + cols[1];
-            bool rc = DateTime.TryParseExact(sdt, "MM/dd/yyyy,HH:mm:ss", null, DateTimeStyles.None, out tick.time);
+            bool rc = DateTime.TryParseExact(cols[0], "s", null, DateTimeStyles.None, out tick.time);
             if (!rc) {
-                Console.WriteLine($"Line {lineno} has invalid date/time: {sdt}. Line ignored.");
+                Console.WriteLine($"Line {lineno} has invalid date/time: {cols[0]}. Line ignored.");
                 return false;
             }
 
-            rc = float.TryParse(cols[2], out tick.open);
+            rc = float.TryParse(cols[1], out tick.open);
             if (!rc | tick.open < minPrice) {
-                Console.WriteLine($"Line {lineno} has invalid open: {cols[2]}. Line ignored.");
+                Console.WriteLine($"Line {lineno} has invalid open: {cols[1]}. Line ignored.");
                 return false;
             }
-
+#if false
             rc = float.TryParse(cols[3], out tick.high);
             if (!rc | tick.high < minPrice) {
                 Console.WriteLine($"Line {lineno} has invalid high: {cols[3]}. Line ignored.");
@@ -257,7 +262,6 @@ namespace CreateRangeBars {
                 Console.WriteLine($"Line {lineno} has invalid volume: {cols[6]}. Line ignored.");
                 return false;
             }
-
             if (tick.open < tick.low) {
                 Console.WriteLine($"Line {lineno} open < low: {cols[2]} < {cols[4]}. Line ignored.");
                 return false;
@@ -287,7 +291,7 @@ namespace CreateRangeBars {
                 return false;
 
             }
-
+#endif
             return true;
         }
     }
