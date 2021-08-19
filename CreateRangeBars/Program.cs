@@ -45,11 +45,13 @@ namespace CreateRangeBars {
         static DateTime firstDate = Convert.ToDateTime("1/1/2000");
         static DateTime checkDate = Convert.ToDateTime("9/18/2020");
 
+        static Logger logger;
+
         static int Main(string[] args) {
             var stopWatch = new Stopwatch();
             stopWatch.Start();
 
-            var logger = new Logger(datafile_outdir);
+            logger = new Logger(datafile_outdir);
             if (logger.state != 0)
                 return -1;
             string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
@@ -70,27 +72,11 @@ namespace CreateRangeBars {
             int maxTimeGap = 0;
             float cumValue = 0f;
 
-            char futures_code = archiveName[futures_root.Length];
-            if (!futures_codes.ContainsKey(futures_code))
-                return logger.log(2, "Malformed futures file name: " + archiveName);
+            (int rc, string out_path) = ValidateFuturesFilename(archiveName);
+            if (rc < 0)
+                return -1;
 
-            // get 4 digit futures year from zip filename (which has 2 digit year)
-            string futures_two_digit_year_str = archiveName.Substring(futures_root.Length + 1, 2);
-            if (!Char.IsDigit(futures_two_digit_year_str[0]) || !Char.IsDigit(futures_two_digit_year_str[1]))
-                return logger.log(2, "Malformed futures file name: " + archiveName);
-            int futures_year;
-            bool parse_suceeded = Int32.TryParse(futures_two_digit_year_str, out futures_year);
-            if (!parse_suceeded)
-                return logger.log(2, "Malformed futures file name: " + archiveName);
-            futures_year += 2000;
-
-            // get filenames for temporary .csv output file and final .zip file
-            string out_fn_base = futures_root + futures_code + futures_two_digit_year_str;
-            string out_path = datafile_outdir + out_fn_base;
-            string out_path_csv = out_path + ".csv"; // full path
-            string out_path_zip = out_path + ".zip"; // full path
-
-            StreamWriter sw = new StreamWriter(out_path_csv);
+            StreamWriter sw = new StreamWriter(out_path + ".csv");
 
             using (ZipArchive archive = ZipFile.OpenRead(archiveName)) {
                 if (archive.Entries.Count != 1) {
@@ -172,6 +158,33 @@ namespace CreateRangeBars {
 
                 return 0;
             }
+        }
+
+        static (int rc, string out_path) ValidateFuturesFilename(string filename) {
+            char futures_code = filename[futures_root.Length];
+            if (!futures_codes.ContainsKey(futures_code)) {
+                logger.log(2, "Malformed futures file name: " + filename);
+                return (-1, "");
+            }
+
+            // get 4 digit futures year from zip filename (which has 2 digit year)
+            string futures_two_digit_year_str = filename.Substring(futures_root.Length + 1, 2);
+            if (!Char.IsDigit(futures_two_digit_year_str[0]) || !Char.IsDigit(futures_two_digit_year_str[1])) {
+                logger.log(2, "Malformed futures file name: " + filename);
+                return (-1, "");
+            }
+
+            int futures_year;
+            bool parse_suceeded = Int32.TryParse(futures_two_digit_year_str, out futures_year);
+            if (!parse_suceeded) {
+                logger.log(2, "Malformed futures file name: " + filename);
+                return (-1, "");
+            }
+
+            string out_fn_base = futures_root + futures_code + futures_two_digit_year_str;
+            string out_path = datafile_outdir + out_fn_base;
+
+            return (0, out_path);
         }
 
         static void WriteTicks(StreamWriter sw, List<Tick> ticks) {
