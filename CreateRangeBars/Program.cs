@@ -124,7 +124,6 @@ namespace CreateRangeBars {
 
                                 WriteTicks(writer, ticks);
                                 ticks.Clear();
-                                tickIndex = 0;
                             }
                             else {
                                 if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
@@ -190,16 +189,16 @@ namespace CreateRangeBars {
             }
         }
 
-        static void ProcessTick(List<Tick> ticks) {
+        // starting from specified tick, see how much money you make/lose going forward
+        static void ProcessTick(int tickIndex, List<Tick> ticks) {
             // search forward until you eithe make or lose $100. Assume $50 per point
-            int phase = 0;
             float value = 0.0f;
             float maxValue = 0.0f;
             float stop = 50.0f;
             float percentStop = 0.25f;
-            float openPrice = ticks[index].close;
-            for (int i = index + 1; i < ticks.Count; i++) {
-                value = 50.0f * (ticks[i].close - openPrice);
+            float close = ticks[0].close;
+            for (int i = 0; i < ticks.Count; i++) {
+                value = 50.0f * (ticks[i].close - close);
                 maxValue = Math.Max(value, maxValue);
 
                 if (value <= maxValue - stop)
