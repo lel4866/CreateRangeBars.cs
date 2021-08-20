@@ -16,11 +16,7 @@ using System.Threading.Tasks;
 
 namespace CreateRangeBars {
     internal class Tick {
-        internal int index;
         internal DateTime time;
-        internal float open;
-        internal float high;
-        internal float low;
         internal float close;
         internal int volume;
         internal float value; // target for ml: looks forward in time
@@ -35,13 +31,12 @@ namespace CreateRangeBars {
         const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars/";
         static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
-        const string userid = "lel48";
         const int minTicks = 4000; // write out message to stats file if day has fewer than this many ticks
         const bool header = false;
         const int maxGap = 60;
-        const float minPrice = 90.00f;
-        const float maxPrice = 1000.00f;
-        const int barSize = 5; // seconds
+        const float minPrice = 100.00f;
+        const float maxPrice = 20000.00f;
+        const int barSize = 1; // seconds
 
         // 01/05/2015,09:30:27,1192.36
         static DateTime preSessionBegTime = Convert.ToDateTime("08:00:00");
@@ -49,7 +44,6 @@ namespace CreateRangeBars {
         static DateTime sessionBegTime = Convert.ToDateTime("09:30:00");
         static TimeSpan sessionStartTS = new TimeSpan(9, 30, 0);
         static DateTime firstDate = Convert.ToDateTime("1/1/2000");
-        static DateTime checkDate = Convert.ToDateTime("9/18/2020");
 
         static Logger logger = new Logger(datafile_outdir);
 
@@ -105,7 +99,6 @@ namespace CreateRangeBars {
 #endif
                     using (StreamWriter writer = new StreamWriter(out_path + ".csv")) {
                         List<Tick> ticks = new List<Tick>();
-                        int tickIndex = 0;
                         while ((row = reader.ReadLine()) != null) {
                             numLines++;
                             Tick tick = new Tick();
@@ -118,7 +111,7 @@ namespace CreateRangeBars {
                             if (tick.time.Date != lastDateTime.Date) {
                                 newDay = true;
                                 if (ticks.Count > 0) {
-                                    Parallel.ForEach(ticks, tick => ProcessTick(ticks, tick.index));
+                                    Parallel.ForEach(ticks, tick => ProcessTick(ticks));
 
                                     // compute total value for day
                                     float cumValueOfDay = 0f;
@@ -143,14 +136,12 @@ namespace CreateRangeBars {
                                         DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
                                         while (fakeTickTime < tick.time) {
                                             Tick newTick = new Tick();
-                                            newTick.index = tickIndex++;
                                             newTick.time = fakeTickTime;
                                             fakeTickTime = fakeTickTime.AddSeconds(barSize);
-                                            newTick.open = newTick.high = newTick.low = newTick.close = tick.close;
+                                            newTick.close = tick.close;
                                             ticks.Add(newTick);
                                         }
                                     }
-                                    tick.index = tickIndex++;
                                     ticks.Add(tick);
                                 }
                             }
@@ -199,7 +190,7 @@ namespace CreateRangeBars {
             }
         }
 
-        static void ProcessTick(List<Tick> ticks, int index) {
+        static void ProcessTick(List<Tick> ticks) {
             // search forward until you eithe make or lose $100. Assume $50 per point
             int phase = 0;
             float value = 0.0f;
@@ -233,35 +224,18 @@ namespace CreateRangeBars {
                 return false;
             }
 
-            rc = float.TryParse(cols[1], out tick.open);
-            if (!rc | tick.open < minPrice) {
-                Console.WriteLine($"Line {lineno} has invalid open: {cols[1]}. Line ignored.");
-                return false;
-            }
-#if false
-            rc = float.TryParse(cols[3], out tick.high);
-            if (!rc | tick.high < minPrice) {
-                Console.WriteLine($"Line {lineno} has invalid high: {cols[3]}. Line ignored.");
-                return false;
-            }
-
-            rc = float.TryParse(cols[4], out tick.low);
-            if (!rc | tick.low < minPrice) {
-                Console.WriteLine($"Line {lineno} has invalid low: {cols[4]}. Line ignored.");
-                return false;
-            }
-
             rc = float.TryParse(cols[5], out tick.close);
             if (!rc | tick.close < minPrice) {
                 Console.WriteLine($"Line {lineno} has invalid close: {cols[5]}. Line ignored.");
                 return false;
             }
-
+#if false
             rc = int.TryParse(cols[6], out tick.volume);
             if (!rc | tick.volume < 0) {
                 Console.WriteLine($"Line {lineno} has invalid volume: {cols[6]}. Line ignored.");
                 return false;
             }
+
             if (tick.open < tick.low) {
                 Console.WriteLine($"Line {lineno} open < low: {cols[2]} < {cols[4]}. Line ignored.");
                 return false;
