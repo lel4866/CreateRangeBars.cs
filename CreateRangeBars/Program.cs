@@ -56,12 +56,12 @@ namespace CreateRangeBars {
 
             string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
             //Parallel.ForEach(archiveNames, archiveName => ProcessTickArchive(futures_root, archiveName, logger));
-            ProcessTickArchive(futures_root, archiveNames[0], logger); // debug
-            logger.close();
+            ProcessTickArchive(futures_root, archiveNames[0], logger); // debug - just process one archive
 
             stopWatch.Stop();
             Console.WriteLine($"Elapsed time = {stopWatch.Elapsed}");
 
+            logger.close();
             return 0;
         }
 
@@ -90,13 +90,6 @@ namespace CreateRangeBars {
 
                 int numLines = 0;
                 using (StreamReader reader = new StreamReader(zip.Open())) {
-#if false // no header written yet
-                    string? header = reader.ReadLine();
-                    if (header == null) {
-                        logger.log(2, zip.Name + " is empty.");
-                        return -1;
-                    }
-#endif
                     using (StreamWriter writer = new StreamWriter(out_path + ".csv")) {
                         List<Tick> ticks = new List<Tick>();
                         while ((row = reader.ReadLine()) != null) {
