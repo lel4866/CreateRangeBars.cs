@@ -15,7 +15,15 @@ using System.IO.Compression;
 using System.Threading.Tasks;
 
 namespace CreateRangeBars {
-    internal class Tick {
+    // warnings are greater than 0, errors are less than 0
+    enum ReturnCodes {
+        Successful = 0,
+        MalformedFuturesFileName = -1,
+        IOErrorReadingData = -2,
+        MultipleFilesInZipFile = -3
+    }
+
+    class Tick {
         internal DateTime time;
         internal float close;
         internal int volume;
@@ -65,7 +73,7 @@ namespace CreateRangeBars {
             return 0;
         }
 
-        static int ProcessTickArchive(string futures_root, string archiveName, Logger logger) {
+        static void ProcessTickArchive(string futures_root, string archiveName, Logger logger) {
             string? row;
             DateTime lastDateTime = DateTime.MinValue;
             bool newDay = false;
@@ -75,105 +83,102 @@ namespace CreateRangeBars {
 
             var archive_filename = Path.GetFullPath(archiveName);
             var futures_contract = Path.GetFileNameWithoutExtension(archiveName);
-            (int rc, string out_path) = ValidateFuturesFilename(futures_contract);
+            ReturnCodes rc = ValidateFuturesFilename(futures_contract, out string out_path);
             if (rc < 0)
-                return -1;
+                return;
 
-            using (ZipArchive archive = ZipFile.OpenRead(archive_filename)) {
-                if (archive.Entries.Count != 1) {
-                    logger.log(1, "There must be only one entry in each zip file: " + archive_filename);
-                    return -1;
+            using ZipArchive archive = ZipFile.OpenRead(archive_filename);
+            if (archive.Entries.Count != 1) {
+                logger.log(ReturnCodes.MultipleFilesInZipFile, "There must be only one entry in each zip file: " + archive_filename);
+                return;
+            }
+            ZipArchiveEntry zip = archive.Entries[0];
+
+            Console.WriteLine("Processing archive " + archive_filename);
+
+            int numLines = 0;
+            using StreamReader reader = new StreamReader(zip.Open());
+            using StreamWriter writer = new StreamWriter(out_path + ".csv");
+            List<Tick> ticks = new List<Tick>();
+            while ((row = reader.ReadLine()) != null) {
+                numLines++;
+                Tick tick = new Tick();
+                if (!validateRow(row, numLines, tick))
+                    continue;
+
+                TimeSpan dtDiff = tick.time.Date - lastDateTime.Date;
+
+                // see if this starts new day
+                if (tick.time.Date != lastDateTime.Date) {
+                    newDay = true;
+                    if (ticks.Count > 0) {
+                        Parallel.ForEach(ticks, tick => ProcessTick(ticks));
+
+                        // compute total value for day
+                        float cumValueOfDay = 0f;
+                        foreach (Tick t in ticks)
+                            cumValueOfDay += t.value;
+                        Console.WriteLine($"Value of {lastDateTime:d} is {cumValueOfDay}");
+
+                        cumValue += cumValueOfDay;
+                    }
+
+                    WriteTicks(writer, ticks);
+                    ticks.Clear();
                 }
-                ZipArchiveEntry zip = archive.Entries[0];
-
-                Console.WriteLine("Processing archive " + archive_filename);
-
-                int numLines = 0;
-                using (StreamReader reader = new StreamReader(zip.Open())) {
-                    using (StreamWriter writer = new StreamWriter(out_path + ".csv")) {
-                        List<Tick> ticks = new List<Tick>();
-                        while ((row = reader.ReadLine()) != null) {
-                            numLines++;
-                            Tick tick = new Tick();
-                            if (!validateRow(row, numLines, tick))
-                                continue;
-
-                            TimeSpan dtDiff = tick.time.Date - lastDateTime.Date;
-
-                            // see if this starts new day
-                            if (tick.time.Date != lastDateTime.Date) {
-                                newDay = true;
-                                if (ticks.Count > 0) {
-                                    Parallel.ForEach(ticks, tick => ProcessTick(ticks));
-
-                                    // compute total value for day
-                                    float cumValueOfDay = 0f;
-                                    foreach (Tick t in ticks)
-                                        cumValueOfDay += t.value;
-                                    Console.WriteLine($"Value of {lastDateTime:d} is {cumValueOfDay}");
-
-                                    cumValue += cumValueOfDay;
-                                }
-
-                                WriteTicks(writer, ticks);
-                                ticks.Clear();
+                else {
+                    if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
+                        // see if we've skipped bar interval
+                        TimeSpan tDiff = tick.time - lastDateTime;
+                        int iDiff = (int)tDiff.TotalSeconds;
+                        if (iDiff > barSize) {
+                            // add fake ticks
+                            DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
+                            while (fakeTickTime < tick.time) {
+                                Tick newTick = new Tick();
+                                newTick.time = fakeTickTime;
+                                fakeTickTime = fakeTickTime.AddSeconds(barSize);
+                                newTick.close = tick.close;
+                                ticks.Add(newTick);
                             }
-                            else {
-                                if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
-                                    // see if we've skipped bar interval
-                                    TimeSpan tDiff = tick.time - lastDateTime;
-                                    int iDiff = (int)tDiff.TotalSeconds;
-                                    if (iDiff > barSize) {
-                                        // add fake ticks
-                                        DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
-                                        while (fakeTickTime < tick.time) {
-                                            Tick newTick = new Tick();
-                                            newTick.time = fakeTickTime;
-                                            fakeTickTime = fakeTickTime.AddSeconds(barSize);
-                                            newTick.close = tick.close;
-                                            ticks.Add(newTick);
-                                        }
-                                    }
-                                    ticks.Add(tick);
-                                }
-                            }
-
-                            lastDateTime = tick.time;
                         }
+                        ticks.Add(tick);
                     }
                 }
 
-                Console.WriteLine($"Total Value is {cumValue}");
-
-                return 0;
+                lastDateTime = tick.time;
             }
+            Console.WriteLine($"Total Value is {cumValue}");
+            return;
         }
 
-        static (int rc, string out_path) ValidateFuturesFilename(string filename) {
+        static ReturnCodes ValidateFuturesFilename(string filename, out string out_path) {
+            filename = "";
+            out_path = "";
             char futures_code = filename[futures_root.Length];
             if (!futures_codes.ContainsKey(futures_code)) {
-                logger.log(2, "Malformed futures file name: " + filename);
-                return (-1, "");
+                logger.log(ReturnCodes.MalformedFuturesFileName, "Malformed futures file name: " + filename);
+                return ReturnCodes.MalformedFuturesFileName;
             }
 
             // get 4 digit futures year from zip filename (which has 2 digit year)
             string futures_two_digit_year_str = filename.Substring(futures_root.Length + 1, 2);
             if (!Char.IsDigit(futures_two_digit_year_str[0]) || !Char.IsDigit(futures_two_digit_year_str[1])) {
-                logger.log(2, "Malformed futures file name: " + filename);
-                return (-1, "");
+                logger.log(ReturnCodes.MalformedFuturesFileName, "Malformed futures file name: " + filename);
+                return ReturnCodes.MalformedFuturesFileName;
             }
 
             int futures_year;
             bool parse_suceeded = Int32.TryParse(futures_two_digit_year_str, out futures_year);
             if (!parse_suceeded) {
-                logger.log(2, "Malformed futures file name: " + filename);
-                return (-1, "");
+                logger.log(ReturnCodes.MalformedFuturesFileName, "Malformed futures file name: " + filename);
+                return ReturnCodes.MalformedFuturesFileName;
             }
 
             string out_fn_base = futures_root + futures_code + futures_two_digit_year_str;
-            string out_path = datafile_outdir + out_fn_base;
+            out_path = datafile_outdir + out_fn_base;
 
-            return (0, out_path);
+            return ReturnCodes.Successful;
         }
 
         static void WriteTicks(StreamWriter sw, List<Tick> ticks) {

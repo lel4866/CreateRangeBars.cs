@@ -8,11 +8,12 @@ using System.Diagnostics;
 namespace CreateRangeBars {
     class Logger {
         internal int state = -1;
+        internal ReturnCodes worst_code = ReturnCodes.Successful;
         StreamWriter? outputFile;
 
         internal Logger(string datafile_dir) {
             try {
-                string log_path = Path.Combine(datafile_dir, "Logs/"); //
+                string log_path = Path.Combine(datafile_dir, "Logs/");
                 if (!Directory.Exists(log_path)) {
                     Directory.CreateDirectory(log_path);
                 }
@@ -30,7 +31,7 @@ namespace CreateRangeBars {
             state = 0;
         }
 
-        internal int log(int code, string message) {
+        internal ReturnCodes log(ReturnCodes code, string message) {
             Debug.Assert(message.Length > 0);
             Debug.Assert(state == 0);
             if (outputFile != null) {
@@ -38,6 +39,9 @@ namespace CreateRangeBars {
                 Debug.Assert(dt_str.Length > 0);
                 outputFile.WriteLine($"{dt_str},{code},{message}");
             }
+
+            if (code < worst_code)
+                worst_code = code;
             return code;
         }
 
