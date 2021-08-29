@@ -22,7 +22,7 @@ namespace CreateRangeBars {
         internal float value; // target for ml: looks forward in time
     }
 
-    static internal class Program {
+    static class Program {
         internal const string version = "CreateRangeBars 0.1.0";
         internal static string futures_root = "ES";
         internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir

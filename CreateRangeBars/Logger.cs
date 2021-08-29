@@ -6,7 +6,7 @@
 using System.Diagnostics;
 
 namespace CreateRangeBars {
-    internal class Logger {
+    class Logger {
         internal int state = -1;
         StreamWriter? outputFile;
 
