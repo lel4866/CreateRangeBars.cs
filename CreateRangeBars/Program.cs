@@ -20,28 +20,31 @@ namespace CreateRangeBars;
 enum ReturnCodes {
     Successful = 0,
     FileIgnored = 1,
+    FileHasLessThanMinTicks = 2,
     MalformedFuturesFileName = -1,
     IOErrorReadingData = -2,
     MultipleFilesInZipFile = -3
 }
 
-class Tick {
-    internal DateTime time;
-    internal float close;
-    internal int volume;
-    internal float value; // target for ml: looks forward in time
+struct Tick {
+    internal DateTime time = new(); // time of start of tick
+    internal float close = 0f;
+    internal int volume = 0;
+    internal float value = 0f; // target for ml: looks forward in time
 }
 
 static class Program {
-    internal const string version = "CreateRangeBars 0.1.0";
-    internal static string futures_root = "ES";
-    internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir
+    const string version = "CreateRangeBars 0.1.0";
+    
+    const string futures_root = "ES";
+    const float tick_size = 0.25f;
 
+    internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir
     const string datafile_dir = "C:/Users/lel48/SierraChartData";
     const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars/";
     static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
-    const int minTicks = 4000; // write out message to stats file if day has fewer than this many ticks
+    const int minTicks = 100; // write out message to stats file if day has fewer than this many ticks
     const bool header = false;
     const int maxGap = 60;
     const float minPrice = 100.00f;
@@ -84,10 +87,6 @@ static class Program {
     // also sets global return_code to -1 if return value is -1
     static int ProcessTickArchive(string archive_name) {
         string? row;
-        bool newDay = false;
-        int numTimeGaps = 0;
-        int maxTimeGap = 0;
-        float cumValue = 0f;
 
         // make sure futures filename has form: {futures_root}{month_code}{2 digit year}
         string fn_base = Path.GetFileNameWithoutExtension(archive_name);
@@ -113,67 +112,71 @@ static class Program {
             Console.WriteLine("Processing archive " + archive_name);
 
             int numLines = 0;
-            TimeSpan lastTime = new();
+            DateTime session_start = new();
+            DateTime session_end = new();
+            DateTime prev_time = new();
+            TimeSpan maxTimeGap = new(0);
+            bool first_tick = true;
+            Tick range_bar = new();
+            Tick tick = new();
             using (StreamReader reader = new StreamReader(zip.Open())) {
                 using (StreamWriter writer = new StreamWriter(out_path_csv)) {
                     List<Tick> ticks = new List<Tick>();
                     while ((row = reader.ReadLine()) != null) {
                         numLines++;
-                        Tick tick = new Tick();
-                        if (!validateRow(row, numLines, tick))
+                        if (!validateRow(row, numLines, ref tick))
                             continue;
 
-                        // check for session start
+                        // check for ist tick of file
+                        if (first_tick) {
+                            prev_time = session_start = range_bar.time = tick.time;
+                            session_end = new DateTime(session_start.Year, session_start.Month, session_start.Day, 16, 30, 0);
+                            if (session_start.TimeOfDay > four_thirty_pm)
+                                session_end = session_end.AddDays(1); // session ends at 4:30p the next day
+
+                            range_bar.close = tick.close;
+                            first_tick = false;
+                            continue;
+                        }
+
+                        // if session end, write ticks from prior session
                         TimeSpan time = tick.time.TimeOfDay;
-                        if (time == six_pm) {
-                            // session start
-                            lastTime = time;
+                        if (tick.time > session_end) {
+                            // add last range bar of session
+                            ticks.Add(range_bar);
+
+                            // write ticks from previous session
+                            WriteTicks(session_start, writer, ticks);
+
+                            // initialize values for new session
+                            ticks.Clear();
+                            prev_time = session_start = range_bar.time = tick.time;
+                            session_end = new DateTime(session_start.Year, session_start.Month, session_start.Day, 16, 30, 0);
+                            if (session_start.TimeOfDay > four_thirty_pm)
+                                session_end = session_end.AddDays(1); // session ends at 4:30p the next day
+
+                            range_bar.close = tick.close;
+
+                            maxTimeGap = new(0);
+                            continue;
                         }
 
                         // check for maximum gap during session
-                        TimeSpan time_diff = time - lastTime;
+                        TimeSpan time_diff = tick.time - prev_time;
+                        if (time_diff > maxTimeGap)
+                            maxTimeGap = time_diff;
 
-                        // see if this starts new day
-                        if (tick.time.Date != lastDateTime.Date) {
-                            newDay = true;
-                            if (ticks.Count > 0) {
-                                Parallel.ForEach(ticks, tick => ProcessTick(ticks));
-
-                                // compute total value for day
-                                float cumValueOfDay = 0f;
-                                foreach (Tick t in ticks)
-                                    cumValueOfDay += t.value;
-                                Console.WriteLine($"Value of {lastDateTime:d} is {cumValueOfDay}");
-
-                                cumValue += cumValueOfDay;
-                            }
-
-                            WriteTicks(writer, ticks);
-                            ticks.Clear();
+                        // if new tick is outside range of range bar, save current range bar, add new range bar
+                        if ((tick.close > range_bar.close + 2f*tick_size) || (tick.close < range_bar.close - 2f*tick_size)) {
+                            // add prior range bar
+                            ticks.Add(range_bar);
+                            range_bar.time = tick.time;
+                            range_bar.close = tick.close;
                         }
-                        else {
-                            if ((tick.time.TimeOfDay >= preSessionBegTime.TimeOfDay && (tick.time.TimeOfDay < sessionEndTime.TimeOfDay))) {
-                                // see if we've skipped bar interval
-                                TimeSpan tDiff = tick.time - lastDateTime;
-                                int iDiff = (int)tDiff.TotalSeconds;
-                                if (iDiff > barSize) {
-                                    // add fake ticks
-                                    DateTime fakeTickTime = lastDateTime.AddSeconds(barSize);
-                                    while (fakeTickTime < tick.time) {
-                                        Tick newTick = new Tick();
-                                        newTick.time = fakeTickTime;
-                                        fakeTickTime = fakeTickTime.AddSeconds(barSize);
-                                        newTick.close = tick.close;
-                                        ticks.Add(newTick);
-                                    }
-                                }
-                                ticks.Add(tick);
-                            }
-                        }
-
-                        lastDateTime = tick.time;
                     }
-                    Console.WriteLine($"Total Value is {cumValue}");
+
+                    // write ticks from previous session
+                    WriteTicks(session_start, writer, ticks);
                 }
             }
         }
@@ -210,12 +213,18 @@ static class Program {
         return 0;
     }
 
-    static void WriteTicks(StreamWriter sw, List<Tick> ticks) {
+    static void WriteTicks(DateTime session_start, StreamWriter sw, List<Tick> ticks) {
+        if (ticks.Count < minTicks) {
+            log(ReturnCodes.FileHasLessThanMinTicks, $"Session starting at {session_start} has less than {minTicks} ticks.");
+            return;
+        }
+
         foreach (Tick tick in ticks) {
             sw.WriteLine($"{tick.time:d},{tick.time:HH:mm:ss},{tick.close:F2},{tick.value:F2}");
         }
     }
 
+#if false
     // starting from specified tick, see how much money you make/lose going forward
     static void ProcessTick(int tickIndex, List<Tick> ticks) {
         // search forward until you eithe make or lose $100. Assume $50 per point
@@ -235,8 +244,10 @@ static class Program {
         }
         ticks[index].value = value;
     }
+#endif
 
-    static bool validateRow(string row, int lineno, Tick tick) {
+    static bool validateRow(string row, int lineno, ref Tick tick) {
+
         // validate row
         string[] cols = row.Split(',');
         if (cols.Length < 2) {
@@ -250,7 +261,7 @@ static class Program {
             return false;
         }
 
-        rc = float.TryParse(cols[5], out tick.close);
+        rc = float.TryParse(cols[1], out tick.close);
         if (!rc || tick.close < minPrice || tick.close > maxPrice) {
             Console.WriteLine($"Line {lineno} has invalid close: {cols[5]}. Line ignored.");
             return false;
