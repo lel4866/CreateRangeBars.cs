@@ -123,10 +123,14 @@ static class Program {
                         if (!validateRow(row, numLines, tick))
                             continue;
 
-                        // reset previous time if session start
+                        // check for session start
                         TimeSpan time = tick.time.TimeOfDay;
-                        if (time == six_pm)
+                        if (time == six_pm) {
+                            // session start
                             lastTime = time;
+                        }
+
+                        // check for maximum gap during session
                         TimeSpan time_diff = time - lastTime;
 
                         // see if this starts new day
