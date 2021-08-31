@@ -38,6 +38,7 @@ static class Program {
     
     const string futures_root = "ES";
     const float tick_size = 0.25f;
+    const float tick_range = 1f; // size of range bar = (2*tickrange + 1)*tick_size
 
     internal static bool update_only = true; // only process .txt files in datafile_dir which do not have counterparts in datafile_outdir
     const string datafile_dir = "C:/Users/lel48/SierraChartData";
@@ -167,7 +168,7 @@ static class Program {
                             maxTimeGap = time_diff;
 
                         // if new tick is outside range of range bar, save current range bar, add new range bar
-                        if ((tick.close > range_bar.close + 2f*tick_size) || (tick.close < range_bar.close - 2f*tick_size)) {
+                        if ((tick.close > range_bar.close + tick_range*tick_size) || (tick.close < range_bar.close - tick_range * tick_size)) {
                             // add prior range bar
                             ticks.Add(range_bar);
                             range_bar.time = tick.time;
