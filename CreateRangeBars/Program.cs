@@ -105,8 +105,8 @@ static class Program {
                 return log(ReturnCodes.FileIgnored, "Update only mode; file ignored: " + archive_name);
         }
 
-        // open zip file. There can only be a single .csv file in zip file
         using (ZipArchive archive = ZipFile.OpenRead(archive_name)) {
+            // open zip file. There can only be a single .csv file in zip file
             if (archive.Entries.Count != 1)
                 return log(ReturnCodes.MultipleFilesInZipFile, "There must be only one entry in each zip file: " + archive_name);
             ZipArchiveEntry zip = archive.Entries[0];
@@ -146,7 +146,7 @@ static class Program {
                             // add last range bar of session
                             ticks.Add(range_bar);
 
-                            // write ticks from previous session
+                            // write ticks from session
                             WriteTicks(session_start, writer, ticks);
 
                             // initialize values for new session
@@ -176,7 +176,7 @@ static class Program {
                         }
                     }
 
-                    // write ticks from previous session
+                    // write ticks from last open session
                     WriteTicks(session_start, writer, ticks);
                 }
             }
