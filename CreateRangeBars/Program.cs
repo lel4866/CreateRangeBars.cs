@@ -34,9 +34,9 @@ struct Tick {
 }
 
 static class Program {
-    const string version = "CreateRangeBars 0.1.0";
+    internal const string version = "CreateRangeBars 0.1.0";
     
-    const string futures_root = "ES";
+    internal static string futures_root = "ES";
     const float tick_size = 0.25f;
     const float tick_range = 1f; // size of range bar = (2*tickrange + 1)*tick_size
 

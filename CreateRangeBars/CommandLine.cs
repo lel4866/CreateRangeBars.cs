@@ -3,7 +3,7 @@
 // Process CreateRangeBars command line
 //
 
-namespace ReadSierraChartDataSharp;
+namespace CreateRangeBars;
 
 static class CommandLine {
     internal static void ProcessCommandLineArguments(string[] args) {
