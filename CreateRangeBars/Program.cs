@@ -236,13 +236,15 @@ static class Program {
     // the value of a tick is the amount of money you make going forward before you get an x% drawdown from maximum
     static void GetValueForEachTickInSession(List<Tick> ticks) {
         for (int it = 0; it < ticks.Count; it++) {
-            float value, starting_value, max_value;
-            starting_value = max_value = ticks[it].close;
+            float value, starting_price;
+            float max_value = 0f;
+            starting_price = ticks[it].close;
+            float maxPointLoss = 0.01f*maxPercentLoss * starting_price;
             for (int i = it + 1; i < ticks.Count; i++) {
-                value = ticks[i].close - starting_value;
+                value = ticks[i].close - starting_price;
                 if (value > max_value)
                     max_value = value;
-                else if ((1f - value / max_value) > maxPercentLoss)
+                else if (max_value-value > maxPointLoss)
                     break;
             }
             Tick tick = ticks[it];
