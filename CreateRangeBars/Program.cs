@@ -3,8 +3,14 @@
 // 2. create additional data fields that can be used as lables or inputs in machine learning.
 //
 // One of the things you need to do for supervised learning is have a label for each observation. In this case the observation
-// is eaach range bar. The primary label this progrm creates is, assuming you entered a trade at the price of the range bar, 
-// what's the maximum percent you could make before some percentage decline. This is the "long term value" of the range bar
+// is each range bar. The primary label this progrm creates is, assuming you entered a trade at the price of the range bar, 
+// what's the maximum percent you could make before some percentage decline. This is the "long term value" of the range bar.
+// There are many other ways to determine value. This is a simple way
+//
+// When determining vaue, we do it using the midpoint of the range bar. While this doesn't match the training data exactly, the
+// point of creating the range bars in the first place is the assumption that the fluctuations around the midpoint are random,
+// and contain no usable information. So, determining value using the midpoint is not exact, but reasonable, given that the price
+// history used when training will never repeat itself exactly.
 
 using System;
 using System.Collections.Generic;
@@ -35,7 +41,7 @@ struct Tick {
 
 static class Program {
     internal const string version = "CreateRangeBars 0.1.0";
-    
+
     internal static string futures_root = "ES";
     const float tick_size = 0.25f;
     const float tick_range = 1f; // size of range bar = (2*tickrange + 1)*tick_size
@@ -51,6 +57,12 @@ static class Program {
     const float minPrice = 100.00f;
     const float maxPrice = 100000.00f;
     const int barSize = 1; // seconds
+
+    // value of each tick is percent gain before x% loss
+    // there are lots of different ways to determine this...I'm starting with a simple way
+    // another way is to set a gain  where you add a break even stop and then use a trailing stop
+    // even more complicated is to add a max time, that is, %gain until an x% loss or until y minutes pass
+    const float maxPercentLoss = 0.2f; // so, if futures are at 1000, this is 2pts ($100) , 2000 is 4pts ($200), 4000 is 8pts ($400)
 
     // 01/05/2015,09:30:27,1192.36
     static DateTime preSessionBegTime = Convert.ToDateTime("08:00:00");
@@ -112,17 +124,18 @@ static class Program {
             ZipArchiveEntry zip = archive.Entries[0];
             Console.WriteLine("Processing archive " + archive_name);
 
-            int numLines = 0;
-            DateTime session_start = new();
-            DateTime session_end = new();
-            DateTime prev_time = new();
-            TimeSpan maxTimeGap = new(0);
-            bool first_tick = true;
-            Tick range_bar = new();
-            Tick tick = new();
             using (StreamReader reader = new StreamReader(zip.Open())) {
                 using (StreamWriter writer = new StreamWriter(out_path_csv)) {
+                    int numLines = 0;
+                    DateTime session_start = new();
+                    DateTime session_end = new();
+                    DateTime prev_time = new();
+                    TimeSpan maxTimeGap = new(0);
+                    bool first_tick = true;
+                    Tick range_bar = new();
+                    Tick tick = new();
                     List<Tick> ticks = new List<Tick>();
+
                     while ((row = reader.ReadLine()) != null) {
                         numLines++;
                         if (!validateRow(row, numLines, ref tick))
@@ -146,11 +159,14 @@ static class Program {
                             // add last range bar of session
                             ticks.Add(range_bar);
 
+                            // get value of each tick in session...the maximum gain before an x% loss
+                            GetValueForEachTickInSession(ticks);
+
                             // write ticks from session
                             WriteTicks(session_start, writer, ticks);
 
                             // initialize values for new session
-                            ticks.Clear();
+                            ticks = new List<Tick>();
                             prev_time = session_start = range_bar.time = tick.time;
                             session_end = new DateTime(session_start.Year, session_start.Month, session_start.Day, 16, 30, 0);
                             if (session_start.TimeOfDay > four_thirty_pm)
@@ -168,13 +184,16 @@ static class Program {
                             maxTimeGap = time_diff;
 
                         // if new tick is outside range of range bar, save current range bar, add new range bar
-                        if ((tick.close > range_bar.close + tick_range*tick_size) || (tick.close < range_bar.close - tick_range * tick_size)) {
+                        if ((tick.close > range_bar.close + tick_range * tick_size) || (tick.close < range_bar.close - tick_range * tick_size)) {
                             // add prior range bar
                             ticks.Add(range_bar);
                             range_bar.time = tick.time;
                             range_bar.close = tick.close;
                         }
                     }
+
+                    // get value of each tick in session...the maximum gain before an x% loss
+                    GetValueForEachTickInSession(ticks);
 
                     // write ticks from last open session
                     WriteTicks(session_start, writer, ticks);
@@ -212,6 +231,26 @@ static class Program {
             return log(ReturnCodes.MalformedFuturesFileName, "Malformed futures file name: " + fn_base + ".zip");
         futures_year += 2000;
         return 0;
+    }
+
+    static void GetValueForEachTickInSession(List<Tick> ticks) {
+        for (int i = 0; i < ticks.Count; i++)
+            GetValueForTick(ticks, i);
+    }
+
+    static void GetValueForTick(List<Tick> ticks, int start) {
+        float value, starting_value, max_value;
+        starting_value = max_value = ticks[start].close;
+        for (int i = start + 1; i < ticks.Count; i++) {
+            value = ticks[i].close - starting_value;
+            if (value > max_value)
+                max_value = value;
+            else if ((1f - value / max_value) > maxPercentLoss)
+                break;
+        }
+        Tick tick = ticks[start];
+        tick.value = max_value;
+        ticks[start] = tick;
     }
 
     static void WriteTicks(DateTime session_start, StreamWriter sw, List<Tick> ticks) {
