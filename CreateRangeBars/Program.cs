@@ -233,24 +233,22 @@ static class Program {
         return 0;
     }
 
+    // the value of a tick is the amount of money you make going forward before you get an x% drawdown from maximum
     static void GetValueForEachTickInSession(List<Tick> ticks) {
-        for (int i = 0; i < ticks.Count; i++)
-            GetValueForTick(ticks, i);
-    }
-
-    static void GetValueForTick(List<Tick> ticks, int start) {
-        float value, starting_value, max_value;
-        starting_value = max_value = ticks[start].close;
-        for (int i = start + 1; i < ticks.Count; i++) {
-            value = ticks[i].close - starting_value;
-            if (value > max_value)
-                max_value = value;
-            else if ((1f - value / max_value) > maxPercentLoss)
-                break;
+        for (int it = 0; it < ticks.Count; it++) {
+            float value, starting_value, max_value;
+            starting_value = max_value = ticks[it].close;
+            for (int i = it + 1; i < ticks.Count; i++) {
+                value = ticks[i].close - starting_value;
+                if (value > max_value)
+                    max_value = value;
+                else if ((1f - value / max_value) > maxPercentLoss)
+                    break;
+            }
+            Tick tick = ticks[it];
+            tick.value = max_value;
+            ticks[it] = tick;
         }
-        Tick tick = ticks[start];
-        tick.value = max_value;
-        ticks[start] = tick;
     }
 
     static void WriteTicks(DateTime session_start, StreamWriter sw, List<Tick> ticks) {
