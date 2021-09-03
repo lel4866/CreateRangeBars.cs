@@ -12,13 +12,9 @@
 // and contain no usable information. So, determining value using the midpoint is not exact, but reasonable, given that the price
 // history used when training will never repeat itself exactly.
 
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.IO.Compression;
-using System.Threading.Tasks;
 
 namespace CreateRangeBars;
 
@@ -29,18 +25,22 @@ enum ReturnCodes {
     FileHasLessThanMinTicks = 2,
     MalformedFuturesFileName = -1,
     IOErrorReadingData = -2,
-    MultipleFilesInZipFile = -3
+    MultipleFilesInZipFile = -3,
+    FileEmpty = -4,
+    InvalidHeader = -5
 }
 
 struct Tick {
     internal DateTime time = new(); // time of start of tick
     internal float close = 0f;
-    internal int volume = 0;
+    internal int bid_volume = 0;
+    internal int ask_volume = 0;
     internal float value = 0f; // target for ml: looks forward in time
 }
 
 static class Program {
     internal const string version = "CreateRangeBars 0.1.0";
+    const string valid_header = "ISODateTime(Eastern/US),Close,BidVolume,AskVolume";
 
     internal static string futures_root = "ES";
     const float tick_size = 0.25f;
@@ -52,11 +52,8 @@ static class Program {
     static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
 
     const int minTicks = 100; // write out message to stats file if day has fewer than this many ticks
-    const bool header = false;
-    const int maxGap = 60;
     const float minPrice = 100.00f;
     const float maxPrice = 100000.00f;
-    const int barSize = 1; // seconds
 
     // value of each tick is percent gain before x% loss
     // there are lots of different ways to determine this...I'm starting with a simple way
@@ -64,15 +61,9 @@ static class Program {
     // even more complicated is to add a max time, that is, %gain until an x% loss or until y minutes pass
     const float maxPercentLoss = 0.2f; // so, if futures are at 1000, this is 2pts ($100) , 2000 is 4pts ($200), 4000 is 8pts ($400)
 
-    // 01/05/2015,09:30:27,1192.36
-    static DateTime preSessionBegTime = Convert.ToDateTime("08:00:00");
-    static DateTime sessionEndTime = Convert.ToDateTime("16:00:00");
-    static DateTime sessionBegTime = Convert.ToDateTime("09:30:00");
-    static TimeSpan sessionStartTS = new TimeSpan(9, 30, 0);
-    static DateTime firstDate = Convert.ToDateTime("1/1/2000");
-
     static readonly TimeSpan four_thirty_pm = new(16, 30, 0); // session end (Eastern/US)
     static readonly TimeSpan six_pm = new(18, 0, 0); // session start (Eastern/US)
+    static DateTime preSessionBegTime = Convert.ToDateTime("08:00:00");
 
     static internal Logger logger = new(datafile_outdir); // this could call System.Environment.Exit
     static int return_code = 0;
@@ -99,8 +90,6 @@ static class Program {
     // returns 0 if (success OR FileIgnored due to update_only mode), -1 for malformed file names, IO error 
     // also sets global return_code to -1 if return value is -1
     static int ProcessTickArchive(string archive_name) {
-        string? row;
-
         // make sure futures filename has form: {futures_root}{month_code}{2 digit year}
         string fn_base = Path.GetFileNameWithoutExtension(archive_name);
         if (ValidateFuturesFilename(fn_base, out int futures_year, out char futures_code) != 0)
@@ -125,6 +114,10 @@ static class Program {
             Console.WriteLine("Processing archive " + archive_name);
 
             using (StreamReader reader = new StreamReader(zip.Open())) {
+                // read header and validate that it cointains the columns we think it contains
+                if (ValidateHeader(reader) != 0)
+                    return -1;
+
                 using (StreamWriter writer = new StreamWriter(out_path_csv)) {
                     int numLines = 0;
                     DateTime session_start = new();
@@ -135,7 +128,7 @@ static class Program {
                     Tick range_bar = new();
                     Tick tick = new();
                     List<Tick> ticks = new List<Tick>();
-
+                    string? row;
                     while ((row = reader.ReadLine()) != null) {
                         numLines++;
                         if (!validateRow(row, numLines, ref tick))
@@ -211,7 +204,6 @@ static class Program {
         return log(ReturnCodes.Successful, out_path_zip + " created.");
     }
 
-
     // make sure filename is of form: {futures_root}{month_code}{2 digit year}
     static int ValidateFuturesFilename(string fn_base, out int futures_year, out char futures_code) {
         futures_year = 0;
@@ -259,39 +251,24 @@ static class Program {
             return;
         }
 
-        foreach (Tick tick in ticks) {
-            sw.WriteLine($"{tick.time:d},{tick.time:HH:mm:ss},{tick.close:F2},{tick.value:F2}");
-        }
+        foreach (Tick tick in ticks) 
+            sw.WriteLine($"{tick.time:d},{tick.time:HH:mm:ss},{tick.close:F2},{tick.bid_volume},{tick.ask_volume},{tick.value:F2}");
     }
 
-#if false
-    // starting from specified tick, see how much money you make/lose going forward
-    static void ProcessTick(int tickIndex, List<Tick> ticks) {
-        // search forward until you eithe make or lose $100. Assume $50 per point
-        float value = 0.0f;
-        float maxValue = 0.0f;
-        float stop = 50.0f;
-        float percentStop = 0.25f;
-        float close = ticks[0].close;
-        for (int i = 0; i < ticks.Count; i++) {
-            value = 50.0f * (ticks[i].close - close);
-            maxValue = Math.Max(value, maxValue);
-
-            if (value <= maxValue - stop)
-                break;
-            else if (value > 200.0)
-                stop = value * percentStop;
-        }
-        ticks[index].value = value;
+    static int ValidateHeader(StreamReader reader) {
+        string? header = reader.ReadLine();
+        if (header == null) 
+            return log(ReturnCodes.FileEmpty, $"File empty: {reader}");
+        if (header != valid_header) 
+            return log(ReturnCodes.InvalidHeader, $"Invalid header in file: {reader}");
+        
+        return 0;
     }
-#endif
 
     static bool validateRow(string row, int lineno, ref Tick tick) {
-
-        // validate row
         string[] cols = row.Split(',');
-        if (cols.Length < 2) {
-            Console.WriteLine($"Line {lineno} has fewer than 2 columns. Line ignored.");
+        if (cols.Length < 4) {
+            Console.WriteLine($"Line {lineno} has fewer than 4 columns. Line ignored.");
             return false;
         }
 
@@ -303,51 +280,57 @@ static class Program {
 
         rc = float.TryParse(cols[1], out tick.close);
         if (!rc || tick.close < minPrice || tick.close > maxPrice) {
-            Console.WriteLine($"Line {lineno} has invalid close: {cols[5]}. Line ignored.");
+            Console.WriteLine($"Line {lineno} has invalid close: {cols[1]}. Line ignored.");
             return false;
         }
+
+        rc = int.TryParse(cols[2], out tick.bid_volume);
+        if (!rc | tick.bid_volume < 0) {
+            Console.WriteLine($"Line {lineno} has invalid bid volume: {cols[2]}. Line ignored.");
+            return false;
+        }
+
+        rc = int.TryParse(cols[3], out tick.ask_volume);
+        if (!rc | tick.ask_volume < 0) {
+            Console.WriteLine($"Line {lineno} has invalid ask volume: {cols[3]}. Line ignored.");
+            return false;
+        }
+
 #if false
-            rc = int.TryParse(cols[6], out tick.volume);
-            if (!rc | tick.volume < 0) {
-                Console.WriteLine($"Line {lineno} has invalid volume: {cols[6]}. Line ignored.");
-                return false;
-            }
+        if (tick.open < tick.low) {
+            Console.WriteLine($"Line {lineno} open < low: {cols[2]} < {cols[4]}. Line ignored.");
+            return false;
 
-            if (tick.open < tick.low) {
-                Console.WriteLine($"Line {lineno} open < low: {cols[2]} < {cols[4]}. Line ignored.");
-                return false;
+        }
 
-            }
+        if (tick.close < tick.low) {
+            Console.WriteLine($"Line {lineno} close < low: {cols[5]} < {cols[4]}. Line ignored.");
+            return false;
 
-            if (tick.close < tick.low) {
-                Console.WriteLine($"Line {lineno} close < low: {cols[5]} < {cols[4]}. Line ignored.");
-                return false;
+        }
 
-            }
+        if (tick.high < tick.low) {
+            Console.WriteLine($"Line {lineno} high < low: {cols[3]} < {cols[4]}. Line ignored.");
+            return false;
 
-            if (tick.high < tick.low) {
-                Console.WriteLine($"Line {lineno} high < low: {cols[3]} < {cols[4]}. Line ignored.");
-                return false;
+        }
 
-            }
+        if (tick.open > tick.high) {
+            Console.WriteLine($"Line {lineno} open > high: {cols[2]} > {cols[3]}. Line ignored.");
+            return false;
 
-            if (tick.open > tick.high) {
-                Console.WriteLine($"Line {lineno} open > high: {cols[2]} > {cols[3]}. Line ignored.");
-                return false;
+        }
 
-            }
+        if (tick.open > tick.high) {
+            Console.WriteLine($"Line {lineno} close > high: {cols[5]} > {cols[3]}. Line ignored.");
+            return false;
 
-            if (tick.open > tick.high) {
-                Console.WriteLine($"Line {lineno} close > high: {cols[5]} > {cols[3]}. Line ignored.");
-                return false;
-
-            }
+        }
 #endif
         return true;
     }
 
-
-    // thread safe setting of return_code
+    // thread safe setting of global return_code
     static int log(ReturnCodes code, string message) {
         logger.log(code, message);
         int rc = code < 0 ? -1 : 0;
