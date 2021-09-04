@@ -129,6 +129,11 @@ static class Program {
                     Tick tick = new();
                     List<Tick> ticks = new List<Tick>();
                     string? row;
+
+                    // write header
+                    writer.WriteLine("ISODateTime(Eastern/US),Close,BidVolume,AskVolume,Value");
+
+                    // compute range bar and value for each range bar (amount of money made before hitng max loss)
                     while ((row = reader.ReadLine()) != null) {
                         numLines++;
                         if (!validateRow(row, numLines, ref tick))
@@ -142,6 +147,7 @@ static class Program {
                                 session_end = session_end.AddDays(1); // session ends at 4:30p the next day
 
                             range_bar.close = tick.close;
+                            range_bar.bid_volume = range_bar.ask_volume = 0;
                             first_tick = false;
                             continue;
                         }
@@ -161,11 +167,14 @@ static class Program {
                             // initialize values for new session
                             ticks = new List<Tick>();
                             prev_time = session_start = range_bar.time = tick.time;
+
                             session_end = new DateTime(session_start.Year, session_start.Month, session_start.Day, 16, 30, 0);
                             if (session_start.TimeOfDay > four_thirty_pm)
                                 session_end = session_end.AddDays(1); // session ends at 4:30p the next day
 
                             range_bar.close = tick.close;
+                            range_bar.bid_volume = tick.bid_volume;
+                            range_bar.ask_volume = tick.ask_volume;
 
                             maxTimeGap = new(0);
                             continue;
@@ -176,12 +185,21 @@ static class Program {
                         if (time_diff > maxTimeGap)
                             maxTimeGap = time_diff;
 
-                        // if new tick is outside range of range bar, save current range bar, add new range bar
+                        // if new tick is outside range of range bar, save current range bar, initialize new range bar
                         if ((tick.close > range_bar.close + tick_range * tick_size) || (tick.close < range_bar.close - tick_range * tick_size)) {
                             // add prior range bar
                             ticks.Add(range_bar);
+
+                            // initialize new range bar
                             range_bar.time = tick.time;
                             range_bar.close = tick.close;
+                            range_bar.bid_volume = tick.bid_volume;
+                            range_bar.ask_volume = tick.ask_volume;
+                        }
+                        else {
+                            // accumulate volume
+                            range_bar.bid_volume += tick.bid_volume;
+                            range_bar.ask_volume += tick.ask_volume;
                         }
                     }
 
@@ -252,7 +270,7 @@ static class Program {
         }
 
         foreach (Tick tick in ticks) 
-            sw.WriteLine($"{tick.time:d},{tick.time:HH:mm:ss},{tick.close:F2},{tick.bid_volume},{tick.ask_volume},{tick.value:F2}");
+            sw.WriteLine($"{tick.time:s},{tick.close:F2},{tick.bid_volume},{tick.ask_volume},{tick.value:F2}");
     }
 
     static int ValidateHeader(StreamReader reader) {
