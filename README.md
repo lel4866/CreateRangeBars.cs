@@ -1,4 +1,4 @@
-# CreateRangeBars
+# CreateRangeBars.cs
 C# version of program to read tick data files created by ReadSierraChartSCIDSharp and create cenetered range bars
 
 This program reads tick files from the local SierraChartData directory and creates associated cenetered range bar files
