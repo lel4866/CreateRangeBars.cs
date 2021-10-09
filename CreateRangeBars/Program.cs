@@ -12,9 +12,13 @@
 // and contain no usable information. So, determining value using the midpoint is not exact, but reasonable, given that the price
 // history used when training will never repeat itself exactly.
 
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.IO.Compression;
+using System.Threading;
 
 namespace CreateRangeBars;
 

@@ -3,6 +3,8 @@
 // Process CreateRangeBars command line
 //
 
+using System;
+
 namespace CreateRangeBars;
 
 static class CommandLine {

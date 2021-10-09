@@ -3,7 +3,10 @@
 // I just need: datetime, code, string
 //
 
+using System;
 using System.Diagnostics;
+using System.IO;
+
 namespace CreateRangeBars;
 
 class Logger {
