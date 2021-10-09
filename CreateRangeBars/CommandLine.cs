@@ -37,6 +37,11 @@ static class CommandLine {
                         Console.WriteLine("    --symbol, -s  : futures contract symbol; i.e. for CME SP500 e-mini: ES");
                         break;
 
+                    case "-amibroker":
+                        // create .csv files for AmiBroker import, not .zip files
+                        Program.AmiBroker = true;
+                        break;
+
                     default:
                         Console.WriteLine("Invalid command line argument: " + arg);
                         System.Environment.Exit(-1);
@@ -44,6 +49,7 @@ static class CommandLine {
                 }
             }
             else {
+                // process 2nd part of command line argument (for those arguments that have two parts)
                 switch (arg_name) {
                     case "-s":
                         if (Program.futures_root.Length > 3) {

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CreateRangeBars": {
+      "commandName": "Project",
+      "commandLineArgs": "-amibroker"
+    }
+  }
+}

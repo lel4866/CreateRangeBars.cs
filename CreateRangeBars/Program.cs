@@ -47,6 +47,8 @@ static class Program {
     const string valid_header = "ISODateTime(Eastern/US),Close,BidVolume,AskVolume";
 
     internal static string futures_root = "ES";
+    internal static bool AmiBroker = false; // if true, instead of creating zip files, creates text files that AmiBrlker can import
+
     const float tick_size = 0.25f;
     const float tick_range = 1f; // size of range bar = (2*tickrange + 1)*tick_size
 
@@ -75,6 +77,8 @@ static class Program {
     static int Main(string[] args) {
         var stopWatch = new Stopwatch();
         stopWatch.Start();
+
+        CommandLine.ProcessCommandLineArguments(args);
 
         try {
             string[] archiveNames = Directory.GetFiles(datafile_dir, futures_root + "*.zip", SearchOption.TopDirectoryOnly);
@@ -217,13 +221,18 @@ static class Program {
         }
 
         // create output zip file and add csv created above to it
-        File.Delete(out_path_zip); // in case zio file already exists...needed or ZipFile.Open with ZipArchiveMode.Create could fail
-        using (ZipArchive archive = ZipFile.Open(out_path_zip, ZipArchiveMode.Create)) {
-            archive.CreateEntryFromFile(out_path_csv, Path.GetFileName(out_path_csv));
-        }
-        File.Delete(out_path_csv); // delete csv file
+        if (!AmiBroker)
+        {
+            File.Delete(out_path_zip); // in case zip file already exists...needed or ZipFile.Open with ZipArchiveMode.Create could fail
+            using (ZipArchive archive = ZipFile.Open(out_path_zip, ZipArchiveMode.Create))
+            {
+                archive.CreateEntryFromFile(out_path_csv, Path.GetFileName(out_path_csv));
+            }
+            File.Delete(out_path_csv); // delete csv file
 
-        return log(ReturnCodes.Successful, out_path_zip + " created.");
+            return log(ReturnCodes.Successful, out_path_zip + " created.");
+        }
+        return log(ReturnCodes.Successful, out_path_csv + " created.");
     }
 
     // make sure filename is of form: {futures_root}{month_code}{2 digit year}
