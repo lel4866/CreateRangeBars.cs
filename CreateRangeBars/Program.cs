@@ -12,6 +12,8 @@
 // and contain no usable information. So, determining value using the midpoint is not exact, but reasonable, given that the price
 // history used when training will never repeat itself exactly.
 
+// note...this doesn't work with data prior to 2000 because of the way output filenames are formed (year-2000)..see line 107
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -56,6 +58,7 @@ static class Program {
     const string datafile_dir = "C:/Users/lel48/SierraChartData";
     const string datafile_outdir = "C:/Users/lel48/SierraChartData/RangeBars/";
     static readonly Dictionary<char, int> futures_codes = new() { { 'H', 3 }, { 'M', 6 }, { 'U', 9 }, { 'Z', 12 } };
+    static string fn_base = "";
 
     const int minTicks = 100; // write out message to stats file if day has fewer than this many ticks
     const float minPrice = 100.00f;
@@ -99,9 +102,10 @@ static class Program {
     // also sets global return_code to -1 if return value is -1
     static int ProcessTickArchive(string archive_name) {
         // make sure futures filename has form: {futures_root}{month_code}{2 digit year}
-        string fn_base = Path.GetFileNameWithoutExtension(archive_name);
+        fn_base = Path.GetFileNameWithoutExtension(archive_name);
         if (ValidateFuturesFilename(fn_base, out int futures_year, out char futures_code) != 0)
             return -1;
+        fn_base = $"{futures_root}{futures_code}{futures_year-2000}";
 
         // get filenames for temporary .csv output file and final .zip file
         string out_path = datafile_outdir + fn_base;
@@ -138,8 +142,9 @@ static class Program {
                     List<Tick> ticks = new List<Tick>();
                     string? row;
 
-                    // write header
-                    writer.WriteLine("ISODateTime(Eastern/US),Close,BidVolume,AskVolume,Value");
+                    // write header (unless we're outputting for AmiBroker)
+                    if (!AmiBroker)
+                        writer.WriteLine("ISODateTime(Eastern/US),Close,BidVolume,AskVolume,Value");
 
                     // compute range bar and value for each range bar (amount of money made before hitng max loss)
                     while ((row = reader.ReadLine()) != null) {
@@ -282,8 +287,12 @@ static class Program {
             return;
         }
 
-        foreach (Tick tick in ticks) 
-            sw.WriteLine($"{tick.time:s},{tick.close:F2},{tick.bid_volume},{tick.ask_volume},{tick.value:F2}");
+        foreach (Tick tick in ticks)
+            if (!AmiBroker)
+                sw.WriteLine($"{tick.time:s},{tick.close:F2},{tick.bid_volume},{tick.ask_volume},{tick.value:F2}");
+            else
+                sw.WriteLine($"{fn_base},{tick.time.ToString("yyyy-MM-dd,HH:mm:ss")},{tick.close:F2},{tick.bid_volume+tick.ask_volume}");
+
     }
 
     static int ValidateHeader(StreamReader reader) {
